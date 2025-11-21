@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const defaultPlatforms = [
   { key: 'facebook', label: 'Facebook' },
@@ -38,7 +38,7 @@ export default function CampaignBuilder() {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setForm((f) => ({ ...f, [name]: value }))
+    setForm((f) => ({ ...f, [name]: name.includes('budget') || name.includes('age') ? Number(value) : value }))
   }
 
   const togglePlatform = (key) => {
@@ -98,6 +98,50 @@ export default function CampaignBuilder() {
       setGeneratingImg(false)
     }
   }
+
+  // Currency & location detection
+  const [currency, setCurrency] = useState({ code: 'USD', symbol: '$', rate: 1, country: 'US', loading: true })
+
+  useEffect(() => {
+    let cancelled = false
+    async function detectCurrency() {
+      try {
+        // Get user's country and currency
+        const locRes = await fetch('https://ipapi.co/json/')
+        const loc = await locRes.json().catch(() => ({}))
+        const code = loc?.currency || 'USD'
+        const country = loc?.country || 'US'
+
+        // Get USD-based exchange rates
+        const rateRes = await fetch('https://api.exchangerate.host/latest?base=USD')
+        const rateData = await rateRes.json().catch(() => ({}))
+        const rate = rateData?.rates?.[code] || 1
+
+        const symbol = new Intl.NumberFormat(undefined, { style: 'currency', currency: code })
+          .formatToParts(1)
+          .find((p) => p.type === 'currency')?.value || '$'
+
+        if (!cancelled) setCurrency({ code, symbol, rate, country, loading: false })
+      } catch (e) {
+        if (!cancelled) setCurrency({ code: 'USD', symbol: '$', rate: 1, country: 'US', loading: false })
+      }
+    }
+    detectCurrency()
+    return () => { cancelled = true }
+  }, [])
+
+  const formatLocal = useMemo(() => {
+    return (usd) => {
+      try {
+        const value = (Number(usd) || 0) * (currency.rate || 1)
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.code }).format(value)
+      } catch {
+        return `${currency.symbol}${((Number(usd) || 0) * (currency.rate || 1)).toFixed(2)}`
+      }
+    }
+  }, [currency])
+
+  const quickPlan = () => setForm((f) => ({ ...f, daily_budget: 0.7 }))
 
   const [creating, setCreating] = useState(false)
   const [createResp, setCreateResp] = useState(null)
@@ -261,16 +305,24 @@ export default function CampaignBuilder() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
               <div>
-                <label className="block text-sm text-blue-200/70">Daily Budget ($)</label>
-                <input type="number" name="daily_budget" value={form.daily_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm text-blue-200/70">Daily Budget (USD)</label>
+                  <button type="button" onClick={quickPlan} className="text-xs px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 border border-blue-700/40">Use $0.70/day</button>
+                </div>
+                <input type="number" step="0.1" min={0.7} name="daily_budget" value={form.daily_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="mt-1 text-xs text-blue-300/70">{currency.loading ? 'Detecting currency…' : `≈ ${formatLocal(form.daily_budget)} per day`}</p>
               </div>
               <div>
-                <label className="block text-sm text-blue-200/70">Total Budget ($)</label>
-                <input type="number" name="total_budget" value={form.total_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-sm text-blue-200/70">Total Budget (USD)</label>
+                <input type="number" step="0.1" min={0} name="total_budget" value={form.total_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="mt-1 text-xs text-blue-300/70">{currency.loading ? '' : `≈ ${formatLocal(form.total_budget)} total`}</p>
               </div>
               <div>
                 <label className="block text-sm text-blue-200/70">Location</label>
-                <input name="audience_location" value={form.audience_location} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <input name="audience_location" value={form.audience_location} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder={currency.loading ? '' : `Detected: ${currency.country}`} />
+                {!currency.loading && (
+                  <p className="mt-1 text-[11px] text-blue-300/60">Prices shown in USD and approx. {currency.code} based on your location.</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm text-blue-200/70">Age Min</label>
