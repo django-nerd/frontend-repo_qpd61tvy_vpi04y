@@ -1,10 +1,16 @@
-import Spline from '@splinetool/react-spline';
+import React, { Suspense, lazy } from 'react'
+
+const SplineCanvas = lazy(() => import('./SplineCanvas'))
 
 export default function Hero() {
   return (
     <section className="relative min-h-[80vh] w-full overflow-hidden bg-slate-900">
       <div className="absolute inset-0">
-        <Spline scene="https://prod.spline.design/8nsoLg1te84JZcE9/scene.splinecode" style={{ width: '100%', height: '100%' }} />
+        <Suspense fallback={<div className="w-full h-full bg-slate-900" />}> 
+          <div className="w-full h-full">
+            <SplineCanvas />
+          </div>
+        </Suspense>
         <div className="absolute inset-0 bg-gradient-to-b from-slate-900/20 via-slate-900/40 to-slate-900 pointer-events-none" />
       </div>
 
@@ -36,5 +42,5 @@ export default function Hero() {
         </div>
       </div>
     </section>
-  );
+  )
 }
