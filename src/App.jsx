@@ -6,14 +6,18 @@ import CampaignBuilder from './components/CampaignBuilder'
 import PaystackCTA from './components/PaystackCTA'
 import AIWriter from './components/AIWriter'
 import PostCreator from './components/PostCreator'
+import TopPosts from './components/TopPosts'
+import PostsFeed from './components/PostsFeed'
 
 function App() {
   return (
     <div className="min-h-screen bg-slate-950">
       <Hero />
+      <TopPosts />
       <Features />
       <AIWriter />
       <PostCreator />
+      <PostsFeed />
       <AdPreview />
       <AccountsManager />
       <CampaignBuilder />
