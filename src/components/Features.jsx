@@ -1,7 +1,12 @@
-import { Rocket, Gauge, ShieldCheck, Share2 } from 'lucide-react'
+import { Rocket, Gauge, ShieldCheck, Share2, PenLine } from 'lucide-react'
 
 export default function Features() {
   const items = [
+    {
+      icon: PenLine,
+      title: 'AI content writer',
+      desc: 'Instant, on-brand copy and variations tuned for each network with smart hashtags.'
+    },
     {
       icon: Rocket,
       title: 'AI-optimized creatives',
@@ -27,7 +32,7 @@ export default function Features() {
   return (
     <section className="relative py-16 bg-slate-950 text-white">
       <div className="max-w-6xl mx-auto px-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           {items.map((it, i) => (
             <div key={i} className="rounded-2xl bg-slate-900/60 border border-slate-700/60 p-6">
               <it.icon className="w-6 h-6 text-blue-400" />

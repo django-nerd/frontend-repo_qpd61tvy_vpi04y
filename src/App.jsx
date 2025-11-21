@@ -4,12 +4,16 @@ import AdPreview from './components/AdPreview'
 import AccountsManager from './components/AccountsManager'
 import CampaignBuilder from './components/CampaignBuilder'
 import PaystackCTA from './components/PaystackCTA'
+import AIWriter from './components/AIWriter'
+import PostCreator from './components/PostCreator'
 
 function App() {
   return (
     <div className="min-h-screen bg-slate-950">
       <Hero />
       <Features />
+      <AIWriter />
+      <PostCreator />
       <AdPreview />
       <AccountsManager />
       <CampaignBuilder />
