@@ -58,6 +58,47 @@ export default function CampaignBuilder() {
     })
   }
 
+  // Image mode: manual or AI
+  const [imageMode, setImageMode] = useState('manual')
+  const [aiImg, setAiImg] = useState({ prompt: '', style: 'photo', width: 1024, height: 1024 })
+  const [generatingImg, setGeneratingImg] = useState(false)
+  const [generatedUrl, setGeneratedUrl] = useState('')
+  const styles = [
+    { key: 'photo', label: 'Photo' },
+    { key: '3d', label: '3D' },
+    { key: 'illustration', label: 'Illustration' },
+    { key: 'neon', label: 'Neon' },
+    { key: 'minimal', label: 'Minimal' },
+  ]
+
+  const generateImage = async () => {
+    if (!aiImg.prompt.trim()) {
+      alert('Please enter a prompt for the AI image')
+      return
+    }
+    try {
+      setGeneratingImg(true)
+      setGeneratedUrl('')
+      const res = await fetch(api('/api/ai/image'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiImg),
+      })
+      const data = await res.json()
+      if (data.image_url) {
+        setGeneratedUrl(data.image_url)
+        // Optimistically set as campaign media URL
+        setForm((f) => ({ ...f, media_url: data.image_url }))
+      } else {
+        alert('Failed to generate image')
+      }
+    } catch (e) {
+      alert('Error generating image: ' + String(e))
+    } finally {
+      setGeneratingImg(false)
+    }
+  }
+
   const [creating, setCreating] = useState(false)
   const [createResp, setCreateResp] = useState(null)
   const [publishing, setPublishing] = useState(false)
@@ -142,10 +183,66 @@ export default function CampaignBuilder() {
                 <label className="block text-sm text-blue-200/70">Primary Text</label>
                 <textarea name="primary_text" value={form.primary_text} onChange={handleChange} rows={4} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Tell your audience why this matters..." />
               </div>
-              <div>
-                <label className="block text-sm text-blue-200/70">Media URL</label>
-                <input name="media_url" value={form.media_url} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://..." />
+
+              {/* Media input: manual vs AI */}
+              <div className="md:col-span-2">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-sm text-blue-200/70">Creative</span>
+                  <div className="inline-flex rounded-lg overflow-hidden border border-slate-700/80">
+                    <button type="button" className={`px-3 py-1.5 text-sm ${imageMode==='manual' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-blue-200/80'}`} onClick={() => setImageMode('manual')}>Manual</button>
+                    <button type="button" className={`px-3 py-1.5 text-sm ${imageMode==='ai' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-blue-200/80'}`} onClick={() => setImageMode('ai')}>AI Image</button>
+                  </div>
+                </div>
+
+                {imageMode === 'manual' ? (
+                  <div>
+                    <label className="block text-xs text-blue-200/60 mb-1">Media URL</label>
+                    <input name="media_url" value={form.media_url} onChange={handleChange} className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://..." />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-800/40 p-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2">
+                        <label className="block text-xs text-blue-200/60 mb-1">Prompt</label>
+                        <input value={aiImg.prompt} onChange={(e)=>setAiImg((s)=>({...s, prompt: e.target.value}))} className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., smartphone floating in water splash, studio lighting" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-blue-200/60 mb-1">Style</label>
+                        <select value={aiImg.style} onChange={(e)=>setAiImg((s)=>({...s, style: e.target.value}))} className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+                          {styles.map(s=> <option key={s.key} value={s.key}>{s.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-blue-200/60 mb-1">Width</label>
+                        <input type="number" min={256} max={2048} value={aiImg.width} onChange={(e)=>setAiImg((s)=>({...s, width: Number(e.target.value)||1024}))} className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-blue-200/60 mb-1">Height</label>
+                        <input type="number" min={256} max={2048} value={aiImg.height} onChange={(e)=>setAiImg((s)=>({...s, height: Number(e.target.value)||1024}))} className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div className="md:col-span-1 flex items-end">
+                        <button type="button" onClick={generateImage} disabled={generatingImg} className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2.5">
+                          {generatingImg ? 'Generating…' : 'Generate'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {generatedUrl && (
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                        <div className="md:col-span-2 rounded-lg overflow-hidden border border-slate-700/70 bg-slate-900">
+                          <img src={generatedUrl} alt="AI creative" className="w-full h-full object-cover" />
+                        </div>
+                        <div className="space-y-2">
+                          <button type="button" onClick={()=>setForm((f)=>({...f, media_url: generatedUrl}))} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5">Use this image</button>
+                          <button type="button" onClick={async ()=>{ try{ await navigator.clipboard.writeText(generatedUrl); alert('Image URL copied')}catch(e){}}} className="w-full rounded-lg bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5">Copy URL</button>
+                          <div className="text-xs text-blue-200/70 break-all">{generatedUrl}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+
               <div>
                 <label className="block text-sm text-blue-200/70">CTA</label>
                 <select name="call_to_action" value={form.call_to_action} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
