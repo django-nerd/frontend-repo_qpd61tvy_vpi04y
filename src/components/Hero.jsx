@@ -11,7 +11,7 @@ export default function Hero() {
       <div className="relative z-10 max-w-7xl mx-auto px-6 pt-16 pb-24">
         <div className="max-w-3xl">
           <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs text-blue-200 ring-1 ring-white/20 backdrop-blur">
-            Fintech-grade Ads Studio
+            Nexus Ads
           </span>
           <h1 className="mt-6 text-4xl md:text-6xl font-bold text-white leading-tight">
             Plan, Launch, and Scale Ads better than the usual platforms

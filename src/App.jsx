@@ -14,7 +14,7 @@ function App() {
       <AccountsManager />
       <CampaignBuilder />
       <PaystackCTA />
-      <footer className="py-10 text-center text-sm text-blue-300/60">Built with ❤️ by your AI Ads Studio</footer>
+      <footer className="py-10 text-center text-sm text-blue-300/60">Nexus Ads — Built with ❤️ by your AI Ads Studio</footer>
     </div>
   )
 }
