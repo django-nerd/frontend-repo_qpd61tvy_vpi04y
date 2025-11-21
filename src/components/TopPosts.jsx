@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 export default function TopPosts() {
   const backend = import.meta.env.VITE_BACKEND_URL || ''
@@ -36,19 +37,35 @@ export default function TopPosts() {
         ) : (
           <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
             {items.map((it) => (
-              <a key={it.id} href={it.destination_url || '#'} target={it.destination_url ? '_blank' : undefined} rel="noreferrer"
-                 className="rounded-2xl border border-slate-700/60 bg-slate-900/60 hover:bg-slate-900 transition p-3 sm:p-4 flex flex-col">
-                {it.media_url && (
-                  <img src={it.media_url} alt={it.title} className="w-full h-40 object-cover rounded-lg mb-3" />
-                )}
-                <h4 className="font-semibold text-base sm:text-lg">{it.title}</h4>
-                <p className="text-sm text-blue-200/80 line-clamp-3 mt-1">{it.summary}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(it.platforms || []).map((p) => (
-                    <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">{p}</span>
-                  ))}
-                </div>
-              </a>
+              it.destination_url ? (
+                <a key={it.id} href={it.destination_url} target="_blank" rel="noreferrer"
+                   className="rounded-2xl border border-slate-700/60 bg-slate-900/60 hover:bg-slate-900 transition p-3 sm:p-4 flex flex-col">
+                  {it.media_url && (
+                    <img src={it.media_url} alt={it.title} className="w-full h-40 object-cover rounded-lg mb-3" />
+                  )}
+                  <h4 className="font-semibold text-base sm:text-lg">{it.title}</h4>
+                  <p className="text-sm text-blue-200/80 line-clamp-3 mt-1">{it.summary}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(it.platforms || []).map((p) => (
+                      <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">{p}</span>
+                    ))}
+                  </div>
+                </a>
+              ) : (
+                <Link key={it.id} to={`/top/${it.id}`}
+                  className="rounded-2xl border border-slate-700/60 bg-slate-900/60 hover:bg-slate-900 transition p-3 sm:p-4 flex flex-col">
+                  {it.media_url && (
+                    <img src={it.media_url} alt={it.title} className="w-full h-40 object-cover rounded-lg mb-3" />
+                  )}
+                  <h4 className="font-semibold text-base sm:text-lg">{it.title}</h4>
+                  <p className="text-sm text-blue-200/80 line-clamp-3 mt-1">{it.summary}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(it.platforms || []).map((p) => (
+                      <span key={p} className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">{p}</span>
+                    ))}
+                  </div>
+                </Link>
+              )
             ))}
           </div>
         )}

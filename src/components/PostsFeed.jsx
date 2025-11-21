@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 function HighlightMentions({ text }) {
   if (!text) return null
@@ -27,6 +27,7 @@ export default function PostsFeed() {
   const [newChat, setNewChat] = useState({})
   const [editingComment, setEditingComment] = useState({}) // {postId: {id, text, attachment_url}}
   const [editingChat, setEditingChat] = useState({}) // {postId: {id, message, attachment_url}}
+  const sseRef = useRef(null)
   const api = (p) => `${backend}${p}`
 
   const fetchPosts = async () => {
@@ -153,6 +154,42 @@ export default function PostsFeed() {
     }, 5000)
     return () => clearInterval(t)
   }, [openPostId])
+
+  // SSE realtime updates
+  useEffect(() => {
+    if (!backend) return
+    const ev = new EventSource(`${backend}/api/stream`)
+    sseRef.current = ev
+    ev.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (!msg) return
+        if (msg.type === 'comment_created' || msg.type === 'comment_updated' || msg.type === 'comment_deleted') {
+          if (msg.post_id && msg.post_id === openPostId) {
+            fetchComments(msg.post_id)
+          }
+        }
+        if (msg.type === 'chat_created' || msg.type === 'chat_updated' || msg.type === 'chat_deleted') {
+          if (msg.post_id && msg.post_id === openPostId) {
+            fetchChat(msg.post_id)
+          }
+        }
+        if (msg.type === 'toppost_created') {
+          // optional: refresh posts feed not needed
+        }
+      } catch (_) {}
+    }
+    ev.onerror = () => {
+      // auto-reconnect by closing and reopening on error
+      ev.close()
+      setTimeout(() => {
+        sseRef.current = new EventSource(`${backend}/api/stream`)
+      }, 2000)
+    }
+    return () => {
+      try { ev.close() } catch (_) {}
+    }
+  }, [backend, openPostId])
 
   const toggleOpen = (postId) => {
     setOpenPostId((id) => (id === postId ? null : postId))
