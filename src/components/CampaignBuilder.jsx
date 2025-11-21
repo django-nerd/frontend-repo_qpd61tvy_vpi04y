@@ -8,6 +8,10 @@ const defaultPlatforms = [
   { key: 'tiktok', label: 'TikTok' },
 ]
 
+const COMMON_CURRENCIES = [
+  'USD','EUR','GBP','NGN','GHS','KES','ZAR','INR','IDR','PHP','VND','JPY','BRL','MXN','CAD','AUD'
+]
+
 export default function CampaignBuilder() {
   const [form, setForm] = useState({
     name: '',
@@ -38,7 +42,7 @@ export default function CampaignBuilder() {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setForm((f) => ({ ...f, [name]: name.includes('budget') || name.includes('age') ? Number(value) : value }))
+    setForm((f) => ({ ...f, [name]: name.includes('budget') || name.includes('age') || name === 'duration_days' ? Number(value) : value }))
   }
 
   const togglePlatform = (key) => {
@@ -87,7 +91,6 @@ export default function CampaignBuilder() {
       const data = await res.json()
       if (data.image_url) {
         setGeneratedUrl(data.image_url)
-        // Optimistically set as campaign media URL
         setForm((f) => ({ ...f, media_url: data.image_url }))
       } else {
         alert('Failed to generate image')
@@ -99,47 +102,81 @@ export default function CampaignBuilder() {
     }
   }
 
-  // Currency & location detection
+  // Currency & location detection + overrides
+  const [rates, setRates] = useState(null)
   const [currency, setCurrency] = useState({ code: 'USD', symbol: '$', rate: 1, country: 'US', loading: true })
+  const [overrideCode, setOverrideCode] = useState('')
+  const [roundLocal, setRoundLocal] = useState(true)
+  const [durationDays, setDurationDays] = useState(7)
+  const [autoTotal, setAutoTotal] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     async function detectCurrency() {
       try {
-        // Get user's country and currency
         const locRes = await fetch('https://ipapi.co/json/')
         const loc = await locRes.json().catch(() => ({}))
-        const code = loc?.currency || 'USD'
+        const detectedCode = loc?.currency || 'USD'
         const country = loc?.country || 'US'
 
-        // Get USD-based exchange rates
         const rateRes = await fetch('https://api.exchangerate.host/latest?base=USD')
         const rateData = await rateRes.json().catch(() => ({}))
-        const rate = rateData?.rates?.[code] || 1
+        const allRates = rateData?.rates || {}
+        const rate = allRates[detectedCode] || 1
 
+        const code = overrideCode || detectedCode
         const symbol = new Intl.NumberFormat(undefined, { style: 'currency', currency: code })
           .formatToParts(1)
           .find((p) => p.type === 'currency')?.value || '$'
 
-        if (!cancelled) setCurrency({ code, symbol, rate, country, loading: false })
+        if (!cancelled) {
+          setRates(allRates)
+          const useRate = allRates[code] || 1
+          setCurrency({ code, symbol, rate: useRate, country, loading: false })
+        }
       } catch (e) {
         if (!cancelled) setCurrency({ code: 'USD', symbol: '$', rate: 1, country: 'US', loading: false })
       }
     }
     detectCurrency()
     return () => { cancelled = true }
-  }, [])
+  }, [overrideCode])
 
-  const formatLocal = useMemo(() => {
-    return (usd) => {
-      try {
-        const value = (Number(usd) || 0) * (currency.rate || 1)
-        return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.code }).format(value)
-      } catch {
-        return `${currency.symbol}${((Number(usd) || 0) * (currency.rate || 1)).toFixed(2)}`
-      }
+  // Auto-calc total budget when enabled or when inputs change
+  useEffect(() => {
+    if (autoTotal) {
+      setForm((f) => ({ ...f, total_budget: Number(((f.daily_budget || 0) * (durationDays || 0)).toFixed(2)) }))
     }
-  }, [currency])
+  }, [autoTotal, durationDays, form.daily_budget])
+
+  const prettyRound = (value, code) => {
+    if (!roundLocal) return value
+    let v = value
+    switch (code) {
+      case 'NGN':
+      case 'IDR':
+      case 'VND':
+        // round to nearest 50 for high-integer currencies
+        v = Math.round(v / 50) * 50
+        break
+      case 'JPY':
+        v = Math.round(v)
+        break
+      default:
+        v = Math.round(v)
+    }
+    return v
+  }
+
+  const formatLocalRaw = (usd) => {
+    const value = (Number(usd) || 0) * (currency.rate || 1)
+    const rounded = prettyRound(value, currency.code)
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.code }).format(rounded)
+    } catch {
+      return `${currency.code} ${rounded.toFixed(0)}`
+    }
+  }
 
   const quickPlan = () => setForm((f) => ({ ...f, daily_budget: 0.7 }))
 
@@ -156,7 +193,7 @@ export default function CampaignBuilder() {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-      const payload = { ...form, audience_interests: interests }
+      const payload = { ...form, audience_interests: interests, duration_days: durationDays, currency: currency.code }
       const res = await fetch(api('/api/campaigns'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,7 +216,7 @@ export default function CampaignBuilder() {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-      const payload = { campaign: { ...form, audience_interests: interests } }
+      const payload = { campaign: { ...form, audience_interests: interests, duration_days: durationDays, currency: currency.code } }
       const res = await fetch(api('/api/publish'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -211,7 +248,7 @@ export default function CampaignBuilder() {
               </div>
               <div>
                 <label className="block text-sm text-blue-200/70">Objective</label>
-                <select name="objective" value={form.objective} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+                <select name="objective" value={form.objective} onChange={handleChange} className="mt-1 w/full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="traffic">Traffic</option>
                   <option value="conversions">Conversions</option>
                   <option value="engagement">Engagement</option>
@@ -305,24 +342,60 @@ export default function CampaignBuilder() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
               <div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <label className="block text-sm text-blue-200/70">Daily Budget (USD)</label>
                   <button type="button" onClick={quickPlan} className="text-xs px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 border border-blue-700/40">Use $0.70/day</button>
                 </div>
                 <input type="number" step="0.1" min={0.7} name="daily_budget" value={form.daily_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
-                <p className="mt-1 text-xs text-blue-300/70">{currency.loading ? 'Detecting currency…' : `≈ ${formatLocal(form.daily_budget)} per day`}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-blue-300/70">{currency.loading ? 'Detecting currency…' : `≈ ${formatLocalRaw(form.daily_budget)} per day`}</p>
+                </div>
               </div>
               <div>
-                <label className="block text-sm text-blue-200/70">Total Budget (USD)</label>
-                <input type="number" step="0.1" min={0} name="total_budget" value={form.total_budget} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
-                <p className="mt-1 text-xs text-blue-300/70">{currency.loading ? '' : `≈ ${formatLocal(form.total_budget)} total`}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="block text-sm text-blue-200/70">Total Budget (USD)</label>
+                  <div className="flex items-center gap-2 text-xs">
+                    <input id="autoTotal" type="checkbox" checked={autoTotal} onChange={(e)=>setAutoTotal(e.target.checked)} />
+                    <label htmlFor="autoTotal" className="cursor-pointer">Auto-calc</label>
+                  </div>
+                </div>
+                <input type="number" step="0.1" min={0} name="total_budget" value={form.total_budget} onChange={(e)=>{ setAutoTotal(false); handleChange(e) }} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="mt-1 text-xs text-blue-300/70">{currency.loading ? '' : `≈ ${formatLocalRaw(form.total_budget)} total`}</p>
               </div>
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="block text-sm text-blue-200/70">Duration (days)</label>
+                </div>
+                <input type="number" min={1} step={1} value={durationDays} onChange={(e)=>setDurationDays(Number(e.target.value)||1)} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="mt-1 text-[11px] text-blue-300/60">Total = Daily × Days when Auto-calc is on.</p>
+              </div>
+
+              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+                <div>
+                  <label className="block text-sm text-blue-200/70">Currency</label>
+                  <select value={overrideCode || currency.code} onChange={(e)=>setOverrideCode(e.target.value)} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Detected ({currency.code})</option>
+                    {COMMON_CURRENCIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex items-center gap-2">
+                    <input id="roundLocal" type="checkbox" checked={roundLocal} onChange={(e)=>setRoundLocal(e.target.checked)} />
+                    <label htmlFor="roundLocal" className="text-sm text-blue-200/80">Round local price</label>
+                  </div>
+                </div>
+                <div className="flex items-end">
+                  {!currency.loading && (
+                    <p className="text-xs text-blue-300/70">Approximate pricing shown in {currency.code} for your location.</p>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm text-blue-200/70">Location</label>
                 <input name="audience_location" value={form.audience_location} onChange={handleChange} className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" placeholder={currency.loading ? '' : `Detected: ${currency.country}`} />
-                {!currency.loading && (
-                  <p className="mt-1 text-[11px] text-blue-300/60">Prices shown in USD and approx. {currency.code} based on your location.</p>
-                )}
               </div>
               <div>
                 <label className="block text-sm text-blue-200/70">Age Min</label>
