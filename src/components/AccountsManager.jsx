@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const platforms = [
   { key: 'facebook', label: 'Facebook' },
@@ -17,6 +17,10 @@ export default function AccountsManager() {
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({ platform: 'facebook', page_id: '', page_name: '', access_token: '' })
   const [saving, setSaving] = useState(false)
+  const [oauthBusy, setOauthBusy] = useState(false)
+  const [oauthMsg, setOauthMsg] = useState('')
+
+  const url = useMemo(() => new URL(window.location.href), [])
 
   const load = async () => {
     setLoading(true)
@@ -71,6 +75,58 @@ export default function AccountsManager() {
     }
   }
 
+  // --- Meta OAuth ---
+  const startMetaOAuth = async () => {
+    setOauthBusy(true)
+    setOauthMsg('Generating OAuth link…')
+    try {
+      const res = await fetch(api('/auth/meta/url'))
+      if (!res.ok) throw new Error('Failed to get OAuth URL')
+      const data = await res.json()
+      const authUrl = data?.url
+      if (!authUrl) throw new Error('No URL returned')
+      window.location.href = authUrl
+    } catch (e) {
+      console.error(e)
+      setOauthMsg('Failed to start OAuth. Check backend env vars.')
+      setOauthBusy(false)
+    }
+  }
+
+  const handleMetaCallback = async () => {
+    const isMeta = url.searchParams.get('meta_oauth') === '1'
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+    if (!isMeta || !code) return
+    setOauthBusy(true)
+    setOauthMsg('Finalizing Meta connection…')
+    try {
+      const res = await fetch(api('/auth/meta/callback'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, state }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.detail || 'OAuth callback failed')
+      setOauthMsg('Connected with Meta successfully. Tokens saved where applicable.')
+      await load()
+    } catch (e) {
+      console.error(e)
+      setOauthMsg('OAuth failed. See console/logs for details.')
+    } finally {
+      // Clean URL params
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete('code')
+      clean.searchParams.delete('state')
+      clean.searchParams.delete('meta_oauth')
+      window.history.replaceState({}, '', clean.toString())
+      setOauthBusy(false)
+      setTimeout(() => setOauthMsg(''), 4000)
+    }
+  }
+
+  useEffect(() => { handleMetaCallback() }, [])
+
   return (
     <section className="relative py-14 bg-slate-950 text-white">
       <div className="max-w-6xl mx-auto px-6">
@@ -109,6 +165,18 @@ export default function AccountsManager() {
               <button onClick={save} disabled={saving} className="w-full rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white py-2.5">{saving ? 'Saving…' : 'Save'}</button>
               <p className="text-xs text-blue-300/60">Tip: For Meta, create a system user/page token in Business Manager for testing.</p>
             </div>
+          </div>
+
+          <div className="bg-slate-900/60 border border-slate-700/60 rounded-2xl p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-medium">Meta connection</h3>
+              {oauthMsg && <span className="text-xs text-blue-300/80">{oauthMsg}</span>}
+            </div>
+            <p className="mt-2 text-sm text-blue-200/70">Use OAuth to securely connect your Facebook/Instagram assets. We’ll exchange the code for a user token and later fetch Page tokens.</p>
+            <button onClick={startMetaOAuth} disabled={oauthBusy} className="mt-4 inline-flex items-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white px-4 py-2.5">
+              {oauthBusy ? 'Working…' : 'Connect with Meta'}
+            </button>
+            <p className="mt-2 text-xs text-blue-300/60">Ensure your server has META_APP_ID, META_APP_SECRET and META_REDIRECT_URI set. Redirect URI should include ?meta_oauth=1.</p>
           </div>
 
           <div className="lg:col-span-2 bg-slate-900/60 border border-slate-700/60 rounded-2xl p-5">
