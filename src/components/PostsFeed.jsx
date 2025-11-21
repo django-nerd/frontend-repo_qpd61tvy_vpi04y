@@ -25,9 +25,14 @@ export default function PostsFeed() {
   const [chats, setChats] = useState({})
   const [newComment, setNewComment] = useState({})
   const [newChat, setNewChat] = useState({})
-  const [editingComment, setEditingComment] = useState({}) // {postId: {id, text, attachment_url}}
-  const [editingChat, setEditingChat] = useState({}) // {postId: {id, message, attachment_url}}
+  const [editingComment, setEditingComment] = useState({})
+  const [editingChat, setEditingChat] = useState({})
+  const [mentionMenu, setMentionMenu] = useState({ visible: false, items: [], anchor: null, for: null })
+  const [typingIndicators, setTypingIndicators] = useState({}) // {postId: {comment: Set(names), chat: Set(names)}}
   const sseRef = useRef(null)
+  const commentInputRefs = useRef({})
+  const chatInputRefs = useRef({})
+  const typingTimers = useRef({})
   const api = (p) => `${backend}${p}`
 
   const fetchPosts = async () => {
@@ -145,7 +150,6 @@ export default function PostsFeed() {
     fetchPosts()
   }, [])
 
-  // lightweight polling for near-realtime
   useEffect(() => {
     if (!openPostId) return
     const t = setInterval(() => {
@@ -155,7 +159,7 @@ export default function PostsFeed() {
     return () => clearInterval(t)
   }, [openPostId])
 
-  // SSE realtime updates
+  // SSE realtime updates, including typing
   useEffect(() => {
     if (!backend) return
     const ev = new EventSource(`${backend}/api/stream`)
@@ -164,31 +168,58 @@ export default function PostsFeed() {
       try {
         const msg = JSON.parse(e.data)
         if (!msg) return
-        if (msg.type === 'comment_created' || msg.type === 'comment_updated' || msg.type === 'comment_deleted') {
-          if (msg.post_id && msg.post_id === openPostId) {
-            fetchComments(msg.post_id)
-          }
+        if ((msg.type || '').startsWith('comment_')) {
+          if (msg.post_id && msg.post_id === openPostId) fetchComments(msg.post_id)
         }
-        if (msg.type === 'chat_created' || msg.type === 'chat_updated' || msg.type === 'chat_deleted') {
-          if (msg.post_id && msg.post_id === openPostId) {
-            fetchChat(msg.post_id)
-          }
+        if ((msg.type || '').startsWith('chat_')) {
+          if (msg.post_id && msg.post_id === openPostId) fetchChat(msg.post_id)
         }
-        if (msg.type === 'toppost_created') {
-          // optional: refresh posts feed not needed
+        if (msg.type === 'typing' && msg.post_id === openPostId) {
+          const channel = msg.channel
+          const name = msg.author || 'Someone'
+          setTypingIndicators((ti) => {
+            const current = { ...(ti[openPostId] || { comment: new Set(), chat: new Set() }) }
+            const setObj = new Set(channel === 'comment' ? current.comment : current.chat)
+            setObj.add(name)
+            const updated = {
+              ...ti,
+              [openPostId]: {
+                comment: channel === 'comment' ? setObj : current.comment,
+                chat: channel === 'chat' ? setObj : current.chat,
+              }
+            }
+            // schedule removal at expiry
+            const key = `${openPostId}:${channel}:${name}`
+            if (typingTimers.current[key]) clearTimeout(typingTimers.current[key])
+            const expires = Date.parse(msg.expires_at || '')
+            const delay = isNaN(expires) ? 3000 : Math.max(500, expires - Date.now())
+            typingTimers.current[key] = setTimeout(() => {
+              setTypingIndicators((inner) => {
+                const cur = { ...(inner[openPostId] || { comment: new Set(), chat: new Set() }) }
+                const s = new Set(channel === 'comment' ? cur.comment : cur.chat)
+                s.delete(name)
+                const after = {
+                  ...inner,
+                  [openPostId]: {
+                    comment: channel === 'comment' ? s : cur.comment,
+                    chat: channel === 'chat' ? s : cur.chat,
+                  }
+                }
+                return after
+              })
+            }, delay)
+            return updated
+          })
         }
       } catch (_) {}
     }
     ev.onerror = () => {
-      // auto-reconnect by closing and reopening on error
       ev.close()
       setTimeout(() => {
         sseRef.current = new EventSource(`${backend}/api/stream`)
       }, 2000)
     }
-    return () => {
-      try { ev.close() } catch (_) {}
-    }
+    return () => { try { ev.close() } catch (_) {} }
   }, [backend, openPostId])
 
   const toggleOpen = (postId) => {
@@ -207,12 +238,109 @@ export default function PostsFeed() {
     }))
   }
 
-  const Field = ({ value, onChange, placeholder }) => (
-    <input value={value || ''} onChange={onChange} placeholder={placeholder} className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 w-full" />
+  const Field = ({ value, onChange, placeholder, inputRef, onKeyDown, onFocus, onBlur }) => (
+    <input ref={inputRef} value={value || ''} onChange={onChange} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur} placeholder={placeholder} className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 w-full" />
   )
+
+  const openMentionMenu = async (postId, channel, value, inputEl) => {
+    const token = getCurrentMentionToken(value)
+    if (!token) {
+      setMentionMenu({ visible: false, items: [], anchor: null, for: null })
+      return
+    }
+    try {
+      const res = await fetch(api(`/api/mentions?q=${encodeURIComponent(token.replace('@',''))}&limit=6`))
+      const data = await res.json()
+      const rect = inputEl?.getBoundingClientRect()
+      setMentionMenu({ visible: true, items: data.items || [], anchor: rect ? { top: rect.top, left: rect.left, width: rect.width } : null, for: { postId, channel } })
+    } catch (e) {
+      setMentionMenu({ visible: false, items: [], anchor: null, for: null })
+    }
+  }
+
+  const insertMention = (postId, channel, handle) => {
+    if (channel === 'comment') {
+      const val = newComment[postId]?.text || ''
+      const replaced = replaceCurrentMentionToken(val, handle)
+      setNewComment((s) => ({ ...s, [postId]: { ...(s[postId] || {}), text: replaced } }))
+    } else {
+      const val = newChat[postId]?.message || ''
+      const replaced = replaceCurrentMentionToken(val, handle)
+      setNewChat((s) => ({ ...s, [postId]: { ...(s[postId] || {}), message: replaced } }))
+    }
+    setMentionMenu({ visible: false, items: [], anchor: null, for: null })
+  }
+
+  const getCurrentMentionToken = (value) => {
+    const beforeCaret = value // simplified: we don't track caret, use full value
+    const match = beforeCaret.match(/(^|\s)(@[A-Za-z0-9_]{1,24})$/)
+    return match ? match[2] : null
+  }
+  const replaceCurrentMentionToken = (value, handle) => value.replace(/(^|\s)(@[A-Za-z0-9_]{1,24})$/, `$1${handle} `)
+
+  const handleTyping = (postId, channel, author) => {
+    try {
+      fetch(api(`/api/posts/${postId}/typing`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, author: author || 'Someone', is_typing: true })
+      })
+    } catch {}
+  }
+
+  const onInputChange = (type, postId) => (e) => {
+    const val = e.target.value
+    if (type === 'comment') {
+      setNewComment((s) => ({ ...s, [postId]: { ...(s[postId] || {}), text: val } }))
+      const el = commentInputRefs.current[postId]
+      openMentionMenu(postId, 'comment', val, el)
+      const author = (newComment[postId]?.author || 'Anon')
+      debounceTyping(postId, 'comment', author)
+    } else {
+      setNewChat((s) => ({ ...s, [postId]: { ...(s[postId] || {}), message: val } }))
+      const el = chatInputRefs.current[postId]
+      openMentionMenu(postId, 'chat', val, el)
+      const author = (newChat[postId]?.author || 'Anon')
+      debounceTyping(postId, 'chat', author)
+    }
+  }
+
+  const debounceTyping = ((() => {
+    const map = {}
+    return (postId, channel, author) => {
+      const key = `${postId}:${channel}`
+      clearTimeout(map[key])
+      handleTyping(postId, channel, author)
+      map[key] = setTimeout(() => {}, 800)
+    }
+  })())
+
+  const MentionDropdown = () => {
+    if (!mentionMenu.visible || (mentionMenu.items || []).length === 0) return null
+    return (
+      <div className="fixed z-40" style={{ top: (mentionMenu.anchor?.top || 0) - 8, left: (mentionMenu.anchor?.left || 0) + 8, width: mentionMenu.anchor?.width || 280 }}>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+          {(mentionMenu.items || []).map((it) => (
+            <button key={it.handle} onMouseDown={(e)=>e.preventDefault()} onClick={() => insertMention(mentionMenu.for.postId, mentionMenu.for.channel, it.handle)} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-800">
+              <span className="text-emerald-300 mr-2">{it.handle}</span>
+              <span className="text-blue-200/80">{it.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const TypingRow = ({ postId, channel }) => {
+    const names = Array.from((typingIndicators[postId]?.[channel] || new Set()))
+    if (names.length === 0) return null
+    const label = names.length === 1 ? `${names[0]} is typing…` : `${names[0]} and ${names.length - 1} more are typing…`
+    return <p className="mt-1 text-xs text-blue-300/70">{label}</p>
+  }
 
   return (
     <section id="posts-feed" className="py-12 sm:py-16 bg-slate-950 text-white">
+      <MentionDropdown />
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="mb-6 sm:mb-8">
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold">Posts Feed</h2>
@@ -247,6 +375,7 @@ export default function PostsFeed() {
                       {/* Comments */}
                       <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3">
                         <h4 className="font-semibold text-sm">Comments</h4>
+                        <TypingRow postId={p.id} channel="comment" />
                         <div className="mt-2 max-h-64 overflow-auto space-y-2 pr-1">
                           {(comments[p.id] || []).map((c) => (
                             <div key={c.id} className="text-sm p-2 rounded bg-slate-900 border border-slate-700">
@@ -291,7 +420,7 @@ export default function PostsFeed() {
                               <button key={em} onClick={()=>pushEmoji(setNewComment, p.id, 'text', em)} className="text-lg px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">{em}</button>
                             ))}
                           </div>
-                          <Field value={newComment[p.id]?.text || ''} onChange={(e)=>setNewComment((s)=>({...s, [p.id]: { ...(s[p.id]||{}), text: e.target.value }}))} placeholder="Add a comment (supports @mentions)" />
+                          <Field inputRef={(el)=> (commentInputRefs.current[p.id] = el)} value={newComment[p.id]?.text || ''} onChange={onInputChange('comment', p.id)} placeholder="Add a comment (type @ to mention)" />
                           <Field value={newComment[p.id]?.attachment_url || ''} onChange={(e)=>setNewComment((s)=>({...s, [p.id]: { ...(s[p.id]||{}), attachment_url: e.target.value }}))} placeholder="Attachment URL (optional)" />
                           <button onClick={()=>addComment(p.id)} className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 w-full sm:w-auto">Send Comment</button>
                         </div>
@@ -300,6 +429,7 @@ export default function PostsFeed() {
                       {/* Chat */}
                       <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3">
                         <h4 className="font-semibold text-sm">Chat</h4>
+                        <TypingRow postId={p.id} channel="chat" />
                         <div className="mt-2 max-h-64 overflow-auto space-y-2 pr-1">
                           {(chats[p.id] || []).map((m) => (
                             <div key={m.id} className="text-sm p-2 rounded bg-slate-900 border border-slate-700">
@@ -344,7 +474,7 @@ export default function PostsFeed() {
                               <button key={em} onClick={()=>pushEmoji(setNewChat, p.id, 'message', em)} className="text-lg px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">{em}</button>
                             ))}
                           </div>
-                          <Field value={newChat[p.id]?.message || ''} onChange={(e)=>setNewChat((s)=>({...s, [p.id]: { ...(s[p.id]||{}), message: e.target.value }}))} placeholder="Type a message (supports @mentions)" />
+                          <Field inputRef={(el)=> (chatInputRefs.current[p.id] = el)} value={newChat[p.id]?.message || ''} onChange={onInputChange('chat', p.id)} placeholder="Type a message (type @ to mention)" />
                           <Field value={newChat[p.id]?.attachment_url || ''} onChange={(e)=>setNewChat((s)=>({...s, [p.id]: { ...(s[p.id]||{}), attachment_url: e.target.value }}))} placeholder="Attachment URL (optional)" />
                           <button onClick={()=>addChatMessage(p.id)} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 w-full sm:w-auto">Send Message</button>
                         </div>
