@@ -185,9 +185,15 @@ export default function CampaignBuilder() {
   const [publishing, setPublishing] = useState(false)
   const [publishResp, setPublishResp] = useState(null)
 
+  // Analytics & actions state
+  const [analytics, setAnalytics] = useState(null)
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const [actionMsg, setActionMsg] = useState('')
+
   const createCampaign = async () => {
     setCreating(true)
     setCreateResp(null)
+    setAnalytics(null)
     try {
       const interests = form.audience_interests
         .split(',')
@@ -230,6 +236,47 @@ export default function CampaignBuilder() {
       setPublishing(false)
     }
   }
+
+  const fetchAnalytics = async (id) => {
+    if (!id) return
+    try {
+      setLoadingAnalytics(true)
+      setActionMsg('')
+      const res = await fetch(api(`/api/campaigns/${id}/analytics`))
+      const data = await res.json()
+      setAnalytics(data)
+    } catch (e) {
+      setActionMsg('Failed to load analytics')
+    } finally {
+      setLoadingAnalytics(false)
+    }
+  }
+
+  const doBoost = async (id) => {
+    if (!id) return
+    try {
+      setActionMsg('')
+      const res = await fetch(api(`/api/campaigns/${id}/boost`), { method: 'POST' })
+      const data = await res.json()
+      setActionMsg(data?.message || 'Boost scheduled')
+    } catch (e) {
+      setActionMsg('Failed to boost')
+    }
+  }
+
+  const doViral = async (id) => {
+    if (!id) return
+    try {
+      setActionMsg('')
+      const res = await fetch(api(`/api/campaigns/${id}/viral`), { method: 'POST' })
+      const data = await res.json()
+      setActionMsg(data?.message || 'Viral push initiated')
+    } catch (e) {
+      setActionMsg('Failed to start viral push')
+    }
+  }
+
+  const shareUrlsFor = (id) => analytics?.share_urls || null
 
   return (
     <section id="builder" className="relative py-16 bg-slate-950 text-white">
@@ -443,6 +490,55 @@ export default function CampaignBuilder() {
               <button onClick={publish} disabled={publishing} className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-4 py-3 font-medium">{publishing ? 'Publishing...' : 'Queue publish (5 pages max)'}</button>
             </div>
 
+            {/* Analytics & Actions */}
+            {createResp?.id && (
+              <div className="mt-6 border-t border-slate-700/60 pt-4">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-semibold">AI Insights</h5>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => fetchAnalytics(createResp.id)} className="text-xs rounded px-2 py-1 bg-indigo-600 hover:bg-indigo-700">{loadingAnalytics ? 'Loading…' : 'Analyze'}</button>
+                    <button onClick={() => doBoost(createResp.id)} className="text-xs rounded px-2 py-1 bg-amber-600 hover:bg-amber-700">Boost</button>
+                    <button onClick={() => doViral(createResp.id)} className="text-xs rounded px-2 py-1 bg-pink-600 hover:bg-pink-700">Viral</button>
+                  </div>
+                </div>
+                {actionMsg && <p className="text-xs text-blue-300/80 mt-2">{actionMsg}</p>}
+
+                {analytics && (
+                  <div className="mt-3 space-y-2 text-sm">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Stat label="Predicted reach" value={analytics.predicted_reach} />
+                      <Stat label="Predicted clicks" value={analytics.predicted_clicks} />
+                      <Stat label="CTR" value={`${analytics.predicted_ctr}%`} />
+                      <Stat label="Cost per lead" value={`$${analytics.predicted_cpl}`} />
+                      <Stat label="Leads (low)" value={analytics.predicted_leads_low} />
+                      <Stat label="Leads (high)" value={analytics.predicted_leads_high} />
+                      <Stat label="Risk score" value={analytics.risk_score} />
+                    </div>
+                    {analytics.suggestions?.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs uppercase tracking-wide text-blue-300/70 mb-1">Suggestions</p>
+                        <ul className="list-disc pl-5 space-y-1 text-blue-100/90">
+                          {analytics.suggestions.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analytics.share_urls && (
+                      <div className="mt-3">
+                        <p className="text-xs uppercase tracking-wide text-blue-300/70 mb-1">Share</p>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(analytics.share_urls).map(([k, v]) => (
+                            <a key={k} href={v} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:bg-slate-700">{k}</a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {createResp && (
               <div className="mt-4 text-xs text-blue-100/80 break-words">
                 <pre className="whitespace-pre-wrap">{JSON.stringify(createResp, null, 2)}</pre>
@@ -457,5 +553,14 @@ export default function CampaignBuilder() {
         </div>
       </div>
     </section>
+  )
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+      <p className="text-xs text-blue-300/70">{label}</p>
+      <p className="text-base font-semibold">{value}</p>
+    </div>
   )
 }
